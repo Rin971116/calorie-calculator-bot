@@ -66,11 +66,13 @@ CMD_SURPLUS = {"熱量盈餘", "今日盈餘", "計算盈餘"}
 
 # 核對階段：確認正確 / 取消 的關鍵字
 CONFIRM_WORDS = {"正確", "對", "ok", "OK", "Ok", "沒問題", "無誤", "正确"}
-CANCEL_WORDS = {"取消", "重傳", "重新上傳", "cancel"}
+CANCEL_WORDS = {"取消", "算了", "不用了", "不用", "重傳", "重新上傳", "cancel", "Cancel"}
 
 MAIN_QUICK = ["今日", "本週", "本月", "上傳體重", "計算基礎代謝率", "熱量盈餘"]
 # 核對階段的快捷按鈕
 REVIEW_QUICK = ["正確", "取消"]
+# 等待輸入時（例如體重）顯示的取消按鈕
+CANCEL_QUICK = ["取消"]
 
 
 # ---------------------------------------------------------------------------
@@ -222,7 +224,8 @@ def handle_stats(user_id, kind):
 # ---------------------------------------------------------------------------
 def prompt_weight(user_id):
     session_store.set(user_id, {"type": "weight"})
-    return [text_msg("請輸入今日體重（公斤，小數點後一位）\n例如：68.5")]
+    return [text_msg("請輸入今日體重（公斤，小數點後一位）\n例如：68.5\n\n（不想記錄可按下方「取消」）",
+                     quick_options=CANCEL_QUICK)]
 
 
 def handle_weight_input(user_id, text):
@@ -230,9 +233,11 @@ def handle_weight_input(user_id, text):
     try:
         weight = round(float(raw), 1)
     except ValueError:
-        return [text_msg("格式不正確 😅 請只輸入數字，例如：68.5")]
+        return [text_msg("格式不正確 😅 請只輸入數字，例如：68.5\n（或按下方「取消」離開）",
+                         quick_options=CANCEL_QUICK)]
     if not (20 <= weight <= 400):
-        return [text_msg("這個體重數值看起來不太對，請確認後再輸入一次（例如 68.5）")]
+        return [text_msg("這個體重數值看起來不太對，請確認後再輸入一次（例如 68.5）\n（或按下方「取消」離開）",
+                         quick_options=CANCEL_QUICK)]
     session_store.clear(user_id)
     nickname = get_nickname(user_id)
     ok = notion_service.save_weight(user_id, weight, nickname)
@@ -335,6 +340,13 @@ def on_text(event):
     maybe_purge()
     text = event.message.text.strip()
     state = session_store.get(user_id)
+
+    # 0) 全域取消：任何進行中的狀態，只要說「取消/算了/不用了…」一律退出回主選單
+    if state and text in CANCEL_WORDS:
+        session_store.clear(user_id)
+        reply(event.reply_token, [text_msg("好的，已取消 👌 需要時再從選單開始即可。",
+                                           quick_options=MAIN_QUICK)])
+        return
 
     # 1) 等待體重輸入
     if state and state.get("type") == "weight":
