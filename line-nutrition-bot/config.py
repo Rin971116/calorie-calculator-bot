@@ -15,12 +15,14 @@ class Config:
 
     # ---- Gemini ----
     GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-    GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
     # ---- Notion ----
     NOTION_API_KEY = os.environ.get("NOTION_API_KEY", "")
-    # 主表：餐點紀錄 + 每日體重
+    # 餐點表：只存餐點紀錄
     NOTION_DATABASE_ID = os.environ.get("NOTION_DATABASE_ID", "")
+    # 體重表：只存體重，同一人同一天覆蓋為最新一筆
+    NOTION_WEIGHT_DATABASE_ID = os.environ.get("NOTION_WEIGHT_DATABASE_ID", "")
     # 代謝率表：每位使用者一列，代表當前代謝率（TDEE）
     NOTION_BMR_DATABASE_ID = os.environ.get("NOTION_BMR_DATABASE_ID", "")
 
@@ -30,6 +32,9 @@ class Config:
 
     # BMR 一週統計所需的最低有效比較天數
     BMR_MIN_DAYS = int(os.environ.get("BMR_MIN_DAYS", "3"))
+
+    # 資料保留天數：超過這個天數的餐點與體重紀錄會被自動清除
+    DATA_RETENTION_DAYS = int(os.environ.get("DATA_RETENTION_DAYS", "60"))
 
     @classmethod
     def validate(cls):
@@ -41,6 +46,7 @@ class Config:
             "GEMINI_API_KEY",
             "NOTION_API_KEY",
             "NOTION_DATABASE_ID",
+            "NOTION_WEIGHT_DATABASE_ID",
             "NOTION_BMR_DATABASE_ID",
         ]:
             if not getattr(cls, key):
