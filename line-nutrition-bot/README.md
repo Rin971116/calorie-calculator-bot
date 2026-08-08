@@ -48,30 +48,43 @@
 ### Step 1. 申請 Gemini API Key
 前往 <https://aistudio.google.com/apikey> → Create API key → 複製（`GEMINI_API_KEY`）。
 
-### Step 2. 建立兩張 Notion 資料庫
+### Step 2. 建立三張 Notion 資料庫
 
 先在 <https://www.notion.so/my-integrations> 建立 integration，複製 **Internal Integration Token**（`NOTION_API_KEY`）。
 
-**資料庫 A — 主表（餐點＋體重）** `NOTION_DATABASE_ID`
+**資料庫 A — 餐點表** `NOTION_DATABASE_ID`
 | 欄位名稱 | 型別 |
 |---|---|
 | `使用者ID` | Title |
+| `暱稱` | Text |
 | `日期時間` | Date |
 | `食物明細` | Text |
 | `總熱量` | Number |
 | `總蛋白質` | Number |
-| `體重` | Number |
 
-**資料庫 B — 代謝率表（每人一列）** `NOTION_BMR_DATABASE_ID`
+**資料庫 B — 體重表** `NOTION_WEIGHT_DATABASE_ID`
 | 欄位名稱 | 型別 |
 |---|---|
 | `使用者ID` | Title |
+| `暱稱` | Text |
+| `日期` | Date |
+| `體重` | Number |
+
+> 體重表採「同一人同一天覆蓋為最新一筆」，所以一天內重複上傳只會留最後一次的值。
+
+**資料庫 C — 代謝率表（每人一列）** `NOTION_BMR_DATABASE_ID`
+| 欄位名稱 | 型別 |
+|---|---|
+| `使用者ID` | Title |
+| `暱稱` | Text |
 | `代謝率` | Number |
 | `更新時間` | Date |
 
-**兩張資料庫都要**打開頁面 → 右上「···」→ Connections → 加入你的 integration（沒做會寫不進去）。
+**三張資料庫都要**打開頁面 → 右上「···」→ Connections → 加入你的 integration（沒做會寫不進去）。
 
 取得各自的 Database ID：資料庫網址 `notion.so/xxxx...xxxx?v=...` 中，`?` 前那段 32 碼即是。
+
+> 資料保留：餐點與體重超過 `DATA_RETENTION_DAYS`（預設 60）天會在使用者互動時自動清除，Notion 不會無限長大。代謝率表每人只有一列，不清除。
 
 ### Step 3. 建立 LINE Bot
 1. <https://developers.line.biz/console/> → 建立 Provider → 建立 Messaging API channel。
@@ -94,10 +107,12 @@
 | `GEMINI_API_KEY` | Gemini 金鑰 |
 | `GEMINI_MODEL` | `gemini-2.5-flash` |
 | `NOTION_API_KEY` | Notion token |
-| `NOTION_DATABASE_ID` | 主表 ID |
+| `NOTION_DATABASE_ID` | 餐點表 ID |
+| `NOTION_WEIGHT_DATABASE_ID` | 體重表 ID |
 | `NOTION_BMR_DATABASE_ID` | 代謝率表 ID |
 | `TIMEZONE_OFFSET` | `8` |
 | `BMR_MIN_DAYS` | `3` |
+| `DATA_RETENTION_DAYS` | `60` |
 
 5. 部署後取得網址，例如 `https://xxxx.onrender.com`。
 
