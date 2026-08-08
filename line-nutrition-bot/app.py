@@ -14,6 +14,7 @@ LINE 食物營養紀錄 Bot — 主程式
   - 體重輸入非數字 → 提示格式
   - BMR / 熱量盈餘缺資料 → 明確回報缺哪一項
 """
+import datetime
 from flask import Flask, request, abort
 
 from linebot.v3 import WebhookHandler
@@ -34,6 +35,22 @@ import bmr_service
 from session import session_store
 
 Config.validate()
+
+# --- 自動清除節流：全服務一天最多實際跑一次 purge ---
+_last_purge_day = {"value": None}
+
+
+def maybe_purge():
+    """互動時順手觸發；同一天只實際清一次，避免每則訊息都掃資料庫。"""
+    tz = datetime.timezone(datetime.timedelta(hours=Config.TIMEZONE_OFFSET))
+    today = datetime.datetime.now(tz).date().isoformat()
+    if _last_purge_day["value"] == today:
+        return
+    _last_purge_day["value"] = today  # 先標記，避免並發重複觸發
+    try:
+        notion_service.purge_old_records()
+    except Exception as e:
+        print("自動清除失敗（略過）：", e)
 
 app = Flask(__name__)
 line_config = Configuration(access_token=Config.LINE_CHANNEL_ACCESS_TOKEN)
@@ -78,6 +95,17 @@ def text_msg(text, quick_options=None):
 def download_image(message_id):
     with ApiClient(line_config) as api_client:
         return bytes(MessagingApiBlob(api_client).get_message_content(message_id))
+
+
+def get_nickname(user_id):
+    """取得使用者的 LINE 顯示名稱；失敗則回空字串（不影響主流程）。"""
+    try:
+        with ApiClient(line_config) as api_client:
+            profile = MessagingApi(api_client).get_profile(user_id)
+            return profile.display_name or ""
+    except Exception as e:
+        print("取得暱稱失敗（略過）：", e)
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +192,8 @@ def finalize(user_id, items):
     lines += ["\n──────────",
               f"總熱量：約 {total_cal} kcal",
               f"總蛋白質：約 {total_pro} g"]
-    saved = notion_service.save_record(user_id, result_items, total_cal, total_pro)
+    nickname = get_nickname(user_id)
+    saved = notion_service.save_record(user_id, result_items, total_cal, total_pro, nickname)
     lines.append("\n✅ 已存入紀錄" if saved else "\n⚠️ 紀錄儲存失敗（已顯示結果）")
     return [text_msg("\n".join(lines), quick_options=MAIN_QUICK)]
 
@@ -205,7 +234,8 @@ def handle_weight_input(user_id, text):
     if not (20 <= weight <= 400):
         return [text_msg("這個體重數值看起來不太對，請確認後再輸入一次（例如 68.5）")]
     session_store.clear(user_id)
-    ok = notion_service.save_weight(user_id, weight)
+    nickname = get_nickname(user_id)
+    ok = notion_service.save_weight(user_id, weight, nickname)
     msg = (f"✅ 已記錄今日體重：{weight} kg" if ok else "⚠️ 體重儲存失敗，請稍後再試")
     return [text_msg(msg, quick_options=MAIN_QUICK)]
 
@@ -217,7 +247,7 @@ def handle_calc_bmr(user_id):
     r = bmr_service.compute_week_bmr(user_id)
     status = r["status"]
     if status == "ok":
-        notion_service.upsert_bmr(user_id, r["value"])
+        notion_service.upsert_bmr(user_id, r["value"], get_nickname(user_id))
         txt = (f"🔥 過去一週基礎代謝率估算\n"
                f"估算值：約 {r['value']} kcal/天\n"
                f"（推估區間 {r['lower']} ~ {r['upper']} kcal）\n\n"
@@ -283,6 +313,7 @@ def callback():
 @handler.add(MessageEvent, message=ImageMessageContent)
 def on_image(event):
     user_id = event.source.user_id
+    maybe_purge()
     try:
         image_bytes = download_image(event.message.id)
         messages = start_new_analysis(user_id, image_bytes)
@@ -301,6 +332,7 @@ def looks_like_correction(text):
 @handler.add(MessageEvent, message=TextMessageContent)
 def on_text(event):
     user_id = event.source.user_id
+    maybe_purge()
     text = event.message.text.strip()
     state = session_store.get(user_id)
 
