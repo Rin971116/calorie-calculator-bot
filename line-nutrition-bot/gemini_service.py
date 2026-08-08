@@ -17,9 +17,9 @@ import google.generativeai as genai
 from PIL import Image
 from config import Config
 
-genai.configure(api_key=Config.GEMINI_API_KEY)
+genai.configure(api_key=Config.GEMINI_API_KEY, transport="rest")
 
-MAX_EDGE = 1024
+MAX_EDGE = 768  # 圖片最長邊（縮小以降低記憶體尖峰，配合 Render 512MB）
 
 
 def _get_model():
@@ -34,8 +34,10 @@ def compress_image(image_bytes):
             scale = MAX_EDGE / max(w, h)
             img = img.resize((int(w * scale), int(h * scale)))
         buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=85)
-        return buf.getvalue(), "image/jpeg"
+        img.save(buf, format="JPEG", quality=80, optimize=True)
+        result = buf.getvalue()
+        img.close()  # 主動釋放 Pillow 佔用的記憶體
+        return result, "image/jpeg"
     except Exception as e:
         print("圖片壓縮失敗，使用原圖：", e)
         return image_bytes, "image/jpeg"
