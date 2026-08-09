@@ -8,8 +8,9 @@ Notion 資料庫存取（三表架構）。
 體重表（NOTION_WEIGHT_DATABASE_ID）：只存體重，同一人同一天覆蓋為最新一筆
   欄位：使用者ID(title)、暱稱(text)、日期(date，只到日)、體重(number)
 
-代謝率表（NOTION_BMR_DATABASE_ID）：每位使用者一列，代表當前代謝率(TDEE)
-  欄位：使用者ID(title)、暱稱(text)、代謝率(number)、更新時間(date)
+每日平均消耗熱量表（NOTION_BMR_DATABASE_ID）：每位使用者一列，代表當前每日平均消耗熱量(TDEE)
+  欄位：使用者ID(title)、暱稱(text)、每日平均消耗熱量(number)、更新時間(date)
+  （註：環境變數名沿用 NOTION_BMR_DATABASE_ID，內部變數仍用 bmr，僅顯示與欄位名正名）
 
 多人分開：所有查詢都以「使用者ID equals 某人 LINE User ID」篩選，天然分開。
 自動清除：purge_old_records() 刪除超過保留天數的餐點與體重（互動時順手呼叫）。
@@ -244,14 +245,14 @@ def get_current_bmr(user_id):
     page = _find_bmr_page(user_id)
     if not page:
         return None
-    return page.get("properties", {}).get("代謝率", {}).get("number")
+    return page.get("properties", {}).get("每日平均消耗熱量", {}).get("number")
 
 
 def upsert_bmr(user_id, bmr_value, nickname=""):
     props = {
         "使用者ID": _title_prop(user_id),
         "暱稱": _text_prop(nickname),
-        "代謝率": {"number": round(bmr_value)},
+        "每日平均消耗熱量": {"number": round(bmr_value)},
         "更新時間": {"date": {"start": _now_local().isoformat()}},
     }
     page = _find_bmr_page(user_id)
