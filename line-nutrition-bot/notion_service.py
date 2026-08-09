@@ -269,6 +269,71 @@ def upsert_bmr(user_id, bmr_value, nickname=""):
 
 
 # ===========================================================================
+# 蛋白質目標表（每人一列，存加權數）
+# ===========================================================================
+def _find_protein_page(user_id):
+    rows = _query(Config.NOTION_PROTEIN_DATABASE_ID,
+                  {"property": "使用者ID", "title": {"equals": user_id}}, page_size=1)
+    return rows[0] if rows else None
+
+
+def get_protein_factor(user_id):
+    """回傳使用者的蛋白質加權數；未設定則 None。"""
+    page = _find_protein_page(user_id)
+    if not page:
+        return None
+    return page.get("properties", {}).get("加權數", {}).get("number")
+
+
+def upsert_protein_factor(user_id, factor, nickname=""):
+    props = {
+        "使用者ID": _title_prop(user_id),
+        "暱稱": _text_prop(nickname),
+        "加權數": {"number": factor},
+        "更新時間": {"date": {"start": _now_local().isoformat()}},
+    }
+    page = _find_protein_page(user_id)
+    if page:
+        r = requests.patch(f"{BASE}/pages/{page['id']}",
+                           headers=_headers(), json={"properties": props}, timeout=30)
+    else:
+        r = requests.post(f"{BASE}/pages", headers=_headers(),
+                          json={"parent": {"database_id": Config.NOTION_PROTEIN_DATABASE_ID},
+                                "properties": props}, timeout=30)
+    if r.status_code >= 300:
+        print("Notion 蛋白質目標更新失敗：", r.status_code, r.text)
+        return False
+    return True
+
+
+def get_latest_weight(user_id, lookback_days=90):
+    """
+    取使用者最近一次的體重紀錄，回傳 (weight, date_str) 或 (None, None)。
+    往回找 lookback_days 天內最新的一筆。
+    """
+    start = (_now_local().date() - datetime.timedelta(days=lookback_days)).isoformat()
+    rows = _query(Config.NOTION_WEIGHT_DATABASE_ID, {
+        "and": [
+            {"property": "使用者ID", "title": {"equals": user_id}},
+            {"property": "日期", "date": {"on_or_after": start}},
+        ]
+    })
+    latest_day = None
+    latest_weight = None
+    for p in rows:
+        props = p.get("properties", {})
+        date_obj = props.get("日期", {}).get("date") or {}
+        d = date_obj.get("start")
+        w = props.get("體重", {}).get("number")
+        if d and w is not None:
+            day = d[:10]
+            if latest_day is None or day > latest_day:
+                latest_day = day
+                latest_weight = w
+    return latest_weight, latest_day
+
+
+# ===========================================================================
 # 自動清除：刪除超過保留天數的餐點與體重
 # ===========================================================================
 def _archive_page(page_id):
