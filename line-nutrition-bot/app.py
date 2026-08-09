@@ -7,7 +7,7 @@ LINE 食物營養紀錄 Bot — 主程式
   3. 每次更正後重新列點，循環直到使用者確認正確
   4. 確認後 → 估算熱量與蛋白質 → 回傳結果 → 寫入 Notion
 
-其他功能：營養統計、上傳體重、計算基礎代謝率、熱量盈餘。
+其他功能：營養統計、上傳體重、計算每日平均消耗熱量、熱量盈餘、設定蛋白質目標。
 
 例外處理：
   - 核對/確認流程 session 遺失（重啟/逾時 15 分鐘）→ 明確告知並請重新上傳照片
@@ -66,7 +66,8 @@ STAT_KEYWORDS = {
     "本月統計": "month", "本月": "month", "這個月": "month",
 }
 CMD_UPLOAD_WEIGHT = {"上傳今日體重", "上傳體重", "輸入體重", "體重"}
-CMD_CALC_BMR = {"計算並設定基礎代謝率", "計算基礎代謝率", "基礎代謝率",
+CMD_CALC_BMR = {"計算每日平均消耗熱量", "每日平均消耗熱量", "每日消耗熱量",
+                "計算並設定基礎代謝率", "計算基礎代謝率", "基礎代謝率",
                 "計算代謝率", "bmr", "BMR"}
 CMD_SURPLUS = {"今日熱量盈餘", "熱量盈餘", "今日盈餘", "計算盈餘"}
 CMD_SET_PROTEIN = {"設定蛋白質目標", "蛋白質目標", "設定蛋白質", "蛋白質"}
@@ -76,9 +77,9 @@ CONFIRM_WORDS = {"正確", "對", "ok", "OK", "Ok", "沒問題", "無誤", "正�
 CANCEL_WORDS = {"取消", "算了", "不用了", "不用", "重傳", "重新上傳", "cancel", "Cancel"}
 
 # 主選單按鈕（顯示＝送出指令）。順序：上傳今日體重、今日熱量盈餘、
-# 今日統計、本週統計、本月統計、計算並設定基礎代謝率
+# 今日統計、本週統計、本月統計、計算每日平均消耗熱量、設定蛋白質目標
 MAIN_QUICK = ["上傳今日體重", "今日熱量盈餘", "今日統計",
-              "本週統計", "本月統計", "計算並設定基礎代謝率", "設定蛋白質目標"]
+              "本週統計", "本月統計", "計算每日平均消耗熱量", "設定蛋白質目標"]
 # 核對階段的快捷按鈕
 REVIEW_QUICK = ["正確", "取消"]
 # 等待輸入時（例如體重）顯示的取消按鈕
@@ -284,12 +285,28 @@ def _build_protein_line(user_id, protein_now):
     return line, hint
 
 
+def _build_calorie_line(user_id, calories_now):
+    """
+    組出熱量那一行（含每日平均消耗熱量對比）。
+      - 沒設定每日平均消耗熱量 → 提示尚未設定
+      - 有設定 → 顯示 x kcal / y kcal 每日平均消耗熱量（淨值 ±N kcal）
+        淨值 = 今日攝取 − 每日平均消耗熱量（赤字為負、盈餘為正）
+    """
+    bmr = notion_service.get_current_bmr(user_id)
+    if bmr is None:
+        return f"總熱量：{calories_now} kcal /（尚未設定每日平均消耗熱量）"
+    net = calories_now - bmr
+    return (f"總熱量：{calories_now} kcal / {bmr} kcal 每日平均消耗熱量"
+            f"（{net:+d} kcal）")
+
+
 def handle_stats(user_id, kind):
     if kind == "today":
         s = notion_service.get_today_total(user_id)
+        calorie_line = _build_calorie_line(user_id, s['calories'])
         protein_line, hint = _build_protein_line(user_id, s['protein'])
         txt = (f"📊 今日累計（{s['meals']} 餐）\n"
-               f"總熱量：{s['calories']} kcal\n{protein_line}")
+               f"{calorie_line}\n{protein_line}")
         if hint:
             txt += f"\n{hint}"
     elif kind == "week":
@@ -369,21 +386,27 @@ def handle_protein_input(user_id, text):
     else:
         msg = "⚠️ 設定儲存失敗，請稍後再試"
     return [text_msg(msg, quick_options=MAIN_QUICK)]
+
+
+# ---------------------------------------------------------------------------
+# 計算每日平均消耗熱量（原「基礎代謝率」，用一週體重變化區間夾擠估算）
+# ---------------------------------------------------------------------------
+def handle_calc_bmr(user_id):
     r = bmr_service.compute_week_bmr(user_id)
     status = r["status"]
     if status == "ok":
         notion_service.upsert_bmr(user_id, r["value"], get_nickname(user_id))
-        txt = (f"🔥 過去一週基礎代謝率估算\n"
+        txt = (f"🔥 過去一週每日平均消耗熱量估算\n"
                f"估算值：約 {r['value']} kcal/天\n"
                f"（推估區間 {r['lower']} ~ {r['upper']} kcal）\n\n"
-               f"✅ 已更新至你的代謝率紀錄")
+               f"✅ 已更新至你的紀錄")
     elif status == "lower_only":
         txt = (f"目前資料只有『體重下降』的日子，\n"
-               f"只能推估基礎代謝率 大於 {r['lower']} kcal。\n"
+               f"只能推估每日平均消耗熱量 大於 {r['lower']} kcal。\n"
                f"需要體重有升有降，才能夾出完整範圍 🙏")
     elif status == "upper_only":
         txt = (f"目前資料只有『體重上升』的日子，\n"
-               f"只能推估基礎代謝率 小於 {r['upper']} kcal。\n"
+               f"只能推估每日平均消耗熱量 小於 {r['upper']} kcal。\n"
                f"需要體重有升有降，才能夾出完整範圍 🙏")
     elif status == "contradiction":
         txt = (f"⚠️ 資料互相矛盾（推估下界 {r['lower']} > 上界 {r['upper']}）。\n"
@@ -411,7 +434,7 @@ def handle_surplus(user_id):
         sign = "盈餘（攝取 > 消耗）" if surplus > 0 else "赤字（攝取 < 消耗）"
         txt = (f"⚖️ 今日熱量盈餘\n"
                f"攝取：{r['intake']} kcal\n"
-               f"代謝率（消耗）：{r['bmr']} kcal\n"
+               f"每日平均消耗熱量：{r['bmr']} kcal\n"
                f"──────────\n"
                f"淨值：{surplus:+d} kcal（{sign}）")
     return [text_msg(txt, quick_options=MAIN_QUICK)]
@@ -518,7 +541,7 @@ def on_text(event):
         "嗨！我可以幫你：\n"
         "📷 傳食物照片 → 列點核對 → 算熱量與蛋白質並存檔\n"
         "⚖️ 上傳今日體重 → 記錄每日體重\n"
-        "🔥 計算並設定基礎代謝率 → 用一週體重變化估算\n"
+        "🔥 計算每日平均消耗熱量 → 用一週體重變化估算\n"
         "📊 今日統計 / 本週統計 / 本月統計 → 查詢紀錄\n"
         "➕ 今日熱量盈餘 → 今日攝取減消耗",
         quick_options=MAIN_QUICK)])
