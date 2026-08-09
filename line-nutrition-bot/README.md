@@ -48,7 +48,7 @@
 ### Step 1. 申請 Gemini API Key
 前往 <https://aistudio.google.com/apikey> → Create API key → 複製（`GEMINI_API_KEY`）。
 
-### Step 2. 建立三張 Notion 資料庫
+### Step 2. 建立四張 Notion 資料庫
 
 先在 <https://www.notion.so/my-integrations> 建立 integration，複製 **Internal Integration Token**（`NOTION_API_KEY`）。
 
@@ -80,7 +80,17 @@
 | `代謝率` | Number |
 | `更新時間` | Date |
 
-**三張資料庫都要**打開頁面 → 右上「···」→ Connections → 加入你的 integration（沒做會寫不進去）。
+**資料庫 D — 蛋白質目標表（每人一列）** `NOTION_PROTEIN_DATABASE_ID`
+| 欄位名稱 | 型別 |
+|---|---|
+| `使用者ID` | Title |
+| `暱稱` | Text |
+| `加權數` | Number |
+| `更新時間` | Date |
+
+> 每日蛋白質目標＝最近一次體重 × 加權數（例如加權 1.5、體重 80kg → 目標 120g）。
+
+**四張資料庫都要**打開頁面 → 右上「···」→ Connections → 加入你的 integration（沒做會寫不進去）。
 
 取得各自的 Database ID：資料庫網址 `notion.so/xxxx...xxxx?v=...` 中，`?` 前那段 32 碼即是。
 
@@ -97,7 +107,7 @@
 2. <https://render.com> → New Web Service → 連結 repo。
 3. 設定：
    - Build Command：`pip install -r requirements.txt`
-   - Start Command：`gunicorn app:app`
+   - Start Command：`gunicorn -c gunicorn.conf.py app:app`
 4. Environment Variables 填入：
 
 | Key | 說明 |
@@ -110,6 +120,7 @@
 | `NOTION_DATABASE_ID` | 餐點表 ID |
 | `NOTION_WEIGHT_DATABASE_ID` | 體重表 ID |
 | `NOTION_BMR_DATABASE_ID` | 代謝率表 ID |
+| `NOTION_PROTEIN_DATABASE_ID` | 蛋白質目標表 ID |
 | `TIMEZONE_OFFSET` | `8` |
 | `BMR_MIN_DAYS` | `3` |
 | `DATA_RETENTION_DAYS` | `60` |
