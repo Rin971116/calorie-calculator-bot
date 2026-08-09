@@ -25,6 +25,8 @@ class Config:
     NOTION_WEIGHT_DATABASE_ID = os.environ.get("NOTION_WEIGHT_DATABASE_ID", "")
     # 代謝率表：每位使用者一列，代表當前代謝率（TDEE）
     NOTION_BMR_DATABASE_ID = os.environ.get("NOTION_BMR_DATABASE_ID", "")
+    # 蛋白質目標表：每位使用者一列，存加權數（目標 = 體重 × 加權數）
+    NOTION_PROTEIN_DATABASE_ID = os.environ.get("NOTION_PROTEIN_DATABASE_ID", "")
 
     # ---- 其他 ----
     # 時區偏移（小時）。台灣為 +8，用於各種「今日/本週/本月」的日期界定。
@@ -48,6 +50,7 @@ class Config:
             "NOTION_DATABASE_ID",
             "NOTION_WEIGHT_DATABASE_ID",
             "NOTION_BMR_DATABASE_ID",
+            "NOTION_PROTEIN_DATABASE_ID",
         ]:
             if not getattr(cls, key):
                 missing.append(key)
