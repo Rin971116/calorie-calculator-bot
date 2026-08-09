@@ -27,6 +27,8 @@ class Config:
     NOTION_BMR_DATABASE_ID = os.environ.get("NOTION_BMR_DATABASE_ID", "")
     # 蛋白質目標表：每位使用者一列，存加權數（目標 = 體重 × 加權數）
     NOTION_PROTEIN_DATABASE_ID = os.environ.get("NOTION_PROTEIN_DATABASE_ID", "")
+    # 使用者權限表：記錄所有對話過的使用者與是否開通
+    NOTION_ACCESS_DATABASE_ID = os.environ.get("NOTION_ACCESS_DATABASE_ID", "")
 
     # ---- 其他 ----
     # 時區偏移（小時）。台灣為 +8，用於各種「今日/本週/本月」的日期界定。
@@ -37,6 +39,13 @@ class Config:
 
     # 資料保留天數：超過這個天數的餐點與體重紀錄會被自動清除
     DATA_RETENTION_DAYS = int(os.environ.get("DATA_RETENTION_DAYS", "60"))
+
+    # 擁有者的 LINE User ID（永遠有權限，當作保險，避免自己被鎖在外面）
+    # 可填多個，用逗號分隔
+    OWNER_USER_IDS = set(
+        uid.strip() for uid in os.environ.get("OWNER_USER_IDS", "").split(",")
+        if uid.strip()
+    )
 
     @classmethod
     def validate(cls):
@@ -51,6 +60,7 @@ class Config:
             "NOTION_WEIGHT_DATABASE_ID",
             "NOTION_BMR_DATABASE_ID",
             "NOTION_PROTEIN_DATABASE_ID",
+            "NOTION_ACCESS_DATABASE_ID",
         ]:
             if not getattr(cls, key):
                 missing.append(key)
