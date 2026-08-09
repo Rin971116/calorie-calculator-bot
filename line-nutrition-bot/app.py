@@ -52,6 +52,37 @@ def maybe_purge():
     except Exception as e:
         print("自動清除失敗（略過）：", e)
 
+
+# --- 權限檢查：Notion 白名單 + 60 秒記憶體快取 ---
+import time as _time
+_access_cache = {}          # user_id -> (is_allowed, timestamp)
+_ACCESS_TTL = 60            # 快取秒數
+
+# 未開通提示（附在使用說明最後）
+NOT_ACTIVATED_NOTE = "\n\n本助理是私人付費服務，有意開通請洽詢主頁貼文，含說明及開通聯繫方式。"
+
+
+def is_allowed(user_id, nickname=""):
+    """
+    判斷使用者是否有權限使用。
+      - 擁有者永遠允許
+      - 其餘查 Notion 權限表（60 秒快取）；不存在則建立未開通紀錄
+    """
+    if user_id in Config.OWNER_USER_IDS:
+        return True
+    # 查快取
+    cached = _access_cache.get(user_id)
+    if cached and (_time.time() - cached[1] < _ACCESS_TTL):
+        return cached[0]
+    # 查 Notion（順便在不存在時建立未開通紀錄）
+    try:
+        allowed = notion_service.check_or_create_access(user_id, nickname)
+    except Exception as e:
+        print("權限查詢失敗（暫視為未開通）：", e)
+        allowed = False
+    _access_cache[user_id] = (allowed, _time.time())
+    return allowed
+
 app = Flask(__name__)
 line_config = Configuration(access_token=Config.LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(Config.LINE_CHANNEL_SECRET)
@@ -459,9 +490,31 @@ def callback():
     return "OK"
 
 
+def _help_text():
+    return (
+        "嗨！我可以幫你：\n"
+        "📷 傳食物照片 → 列點核對 → 算熱量與蛋白質，可選擇是否計入紀錄\n"
+        "⚖️ 上傳今日體重 → 記錄每日體重\n"
+        "🎯 設定蛋白質目標 → 設定每日蛋白質目標（體重的幾倍）\n"
+        "🔥 計算每日平均消耗熱量 → 用一週體重變化估算\n"
+        "📊 今日統計 → 今日熱量/蛋白質，並對比目標與每日消耗\n"
+        "📈 本週統計 / 本月統計 → 每日平均查詢\n"
+        "\n（打「今日熱量盈餘」也可單獨查今日攝取減消耗）"
+    )
+
+
+def not_activated_reply():
+    """未開通使用者的回覆：使用說明 + 付費提示（不附功能按鈕）。"""
+    return [text_msg(_help_text() + NOT_ACTIVATED_NOTE)]
+
+
 @handler.add(MessageEvent, message=ImageMessageContent)
 def on_image(event):
     user_id = event.source.user_id
+    # 權限檢查：未開通者一律擋下
+    if not is_allowed(user_id, get_nickname(user_id)):
+        reply(event.reply_token, not_activated_reply())
+        return
     maybe_purge()
     try:
         image_bytes = download_image(event.message.id)
@@ -481,6 +534,10 @@ def looks_like_correction(text):
 @handler.add(MessageEvent, message=TextMessageContent)
 def on_text(event):
     user_id = event.source.user_id
+    # 權限檢查：未開通者一律回未開通提示，不執行任何功能
+    if not is_allowed(user_id, get_nickname(user_id)):
+        reply(event.reply_token, not_activated_reply())
+        return
     maybe_purge()
     text = event.message.text.strip()
     state = session_store.get(user_id)
@@ -537,16 +594,7 @@ def on_text(event):
         return
 
     # 5) 使用說明
-    reply(event.reply_token, [text_msg(
-        "嗨！我可以幫你：\n"
-        "📷 傳食物照片 → 列點核對 → 算熱量與蛋白質，可選擇是否計入紀錄\n"
-        "⚖️ 上傳今日體重 → 記錄每日體重\n"
-        "🎯 設定蛋白質目標 → 設定每日蛋白質目標（體重的幾倍）\n"
-        "🔥 計算每日平均消耗熱量 → 用一週體重變化估算\n"
-        "📊 今日統計 → 今日熱量/蛋白質，並對比目標與每日消耗\n"
-        "📈 本週統計 / 本月統計 → 每日平均查詢\n"
-        "\n（打「今日熱量盈餘」也可單獨查今日攝取減消耗）",
-        quick_options=MAIN_QUICK)])
+    reply(event.reply_token, [text_msg(_help_text(), quick_options=MAIN_QUICK)])
 
 
 if __name__ == "__main__":
