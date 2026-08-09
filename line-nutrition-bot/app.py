@@ -57,18 +57,27 @@ line_config = Configuration(access_token=Config.LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(Config.LINE_CHANNEL_SECRET)
 
 # 指令關鍵字
-STAT_KEYWORDS = {"今日": "today", "今天": "today",
-                 "本週": "week", "這週": "week",
-                 "本月": "month", "這個月": "month"}
-CMD_UPLOAD_WEIGHT = {"上傳體重", "輸入體重", "體重"}
-CMD_CALC_BMR = {"計算基礎代謝率", "基礎代謝率", "計算代謝率", "bmr", "BMR"}
-CMD_SURPLUS = {"熱量盈餘", "今日盈餘", "計算盈餘"}
+STAT_KEYWORDS = {
+    # 今日（新名稱 + 舊指令）
+    "今日統計": "today", "今日": "today", "今天": "today",
+    # 本週
+    "本週統計": "week", "本週": "week", "這週": "week",
+    # 本月
+    "本月統計": "month", "本月": "month", "這個月": "month",
+}
+CMD_UPLOAD_WEIGHT = {"上傳今日體重", "上傳體重", "輸入體重", "體重"}
+CMD_CALC_BMR = {"計算並設定基礎代謝率", "計算基礎代謝率", "基礎代謝率",
+                "計算代謝率", "bmr", "BMR"}
+CMD_SURPLUS = {"今日熱量盈餘", "熱量盈餘", "今日盈餘", "計算盈餘"}
 
 # 核對階段：確認正確 / 取消 的關鍵字
 CONFIRM_WORDS = {"正確", "對", "ok", "OK", "Ok", "沒問題", "無誤", "正确"}
 CANCEL_WORDS = {"取消", "算了", "不用了", "不用", "重傳", "重新上傳", "cancel", "Cancel"}
 
-MAIN_QUICK = ["今日", "本週", "本月", "上傳體重", "計算基礎代謝率", "熱量盈餘"]
+# 主選單按鈕（顯示＝送出指令）。順序：上傳今日體重、今日熱量盈餘、
+# 今日統計、本週統計、本月統計、計算並設定基礎代謝率
+MAIN_QUICK = ["上傳今日體重", "今日熱量盈餘", "今日統計",
+              "本週統計", "本月統計", "計算並設定基礎代謝率"]
 # 核對階段的快捷按鈕
 REVIEW_QUICK = ["正確", "取消"]
 # 等待輸入時（例如體重）顯示的取消按鈕
@@ -383,10 +392,10 @@ def on_text(event):
     reply(event.reply_token, [text_msg(
         "嗨！我可以幫你：\n"
         "📷 傳食物照片 → 列點核對 → 算熱量與蛋白質並存檔\n"
-        "⚖️ 上傳體重 → 記錄每日體重\n"
-        "🔥 計算基礎代謝率 → 用一週體重變化估算\n"
-        "📊 今日 / 本週 / 本月 → 查詢統計\n"
-        "➕ 熱量盈餘 → 今日攝取減消耗",
+        "⚖️ 上傳今日體重 → 記錄每日體重\n"
+        "🔥 計算並設定基礎代謝率 → 用一週體重變化估算\n"
+        "📊 今日統計 / 本週統計 / 本月統計 → 查詢紀錄\n"
+        "➕ 今日熱量盈餘 → 今日攝取減消耗",
         quick_options=MAIN_QUICK)])
 
 
