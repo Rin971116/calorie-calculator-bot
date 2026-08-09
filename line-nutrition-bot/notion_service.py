@@ -370,3 +370,40 @@ def purge_old_records():
     if deleted:
         print(f"自動清除：已移除 {deleted} 筆超過 {Config.DATA_RETENTION_DAYS} 天的紀錄")
     return deleted
+
+
+# ===========================================================================
+# 使用者權限表（白名單）
+#   欄位：使用者ID(title)、暱稱(text)、是否開通(checkbox)、首次加入時間(date)
+# ===========================================================================
+def _find_access_page(user_id):
+    rows = _query(Config.NOTION_ACCESS_DATABASE_ID,
+                  {"property": "使用者ID", "title": {"equals": user_id}}, page_size=1)
+    return rows[0] if rows else None
+
+
+def check_or_create_access(user_id, nickname=""):
+    """
+    查權限表：
+      - 不存在 → 建立一筆（預設未開通），回傳 False（未開通）
+      - 存在 → 回傳「是否開通」的布林值
+    回傳 True 表示已開通、False 表示未開通。
+    """
+    page = _find_access_page(user_id)
+    if page:
+        return bool(page.get("properties", {})
+                    .get("是否開通", {}).get("checkbox", False))
+
+    # 不存在 → 建立未開通紀錄
+    props = {
+        "使用者ID": _title_prop(user_id),
+        "暱稱": _text_prop(nickname),
+        "是否開通": {"checkbox": False},
+        "首次加入時間": {"date": {"start": _now_local().isoformat()}},
+    }
+    r = requests.post(f"{BASE}/pages", headers=_headers(),
+                      json={"parent": {"database_id": Config.NOTION_ACCESS_DATABASE_ID},
+                            "properties": props}, timeout=30)
+    if r.status_code >= 300:
+        print("Notion 權限表建立失敗：", r.status_code, r.text)
+    return False
