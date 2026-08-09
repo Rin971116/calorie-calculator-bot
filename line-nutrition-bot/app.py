@@ -82,6 +82,10 @@ MAIN_QUICK = ["上傳今日體重", "今日熱量盈餘", "今日統計",
 REVIEW_QUICK = ["正確", "取消"]
 # 等待輸入時（例如體重）顯示的取消按鈕
 CANCEL_QUICK = ["取消"]
+# 「是否計入紀錄」的按鈕與關鍵字
+SAVE_QUICK = ["是，記錄", "否，只是查詢"]
+SAVE_YES_WORDS = {"是，記錄", "是", "記錄", "要", "好", "yes", "Yes"}
+SAVE_NO_WORDS = {"否，只是查詢", "否", "不是", "不要", "只是查詢", "查詢", "no", "No"}
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +192,7 @@ def handle_review_reply(user_id, text):
 
 
 def finalize(user_id, items):
+    """核對完成後：估算營養、顯示結果，並詢問是否計入紀錄（先不寫入）。"""
     try:
         nutrition = gemini_service.estimate_nutrition(items)
     except Exception as e:
@@ -202,11 +207,45 @@ def finalize(user_id, items):
                      f"   {it.get('calories',0)} kcal / 蛋白質 {it.get('protein',0)} g")
     lines += ["\n──────────",
               f"總熱量：約 {total_cal} kcal",
-              f"總蛋白質：約 {total_pro} g"]
-    nickname = get_nickname(user_id)
-    saved = notion_service.save_record(user_id, result_items, total_cal, total_pro, nickname)
-    lines.append("\n✅ 已存入紀錄" if saved else "\n⚠️ 紀錄儲存失敗（已顯示結果）")
-    return [text_msg("\n".join(lines), quick_options=MAIN_QUICK)]
+              f"總蛋白質：約 {total_pro} g",
+              "\n是否要將這餐計入今天的飲食紀錄？"]
+
+    # 把結果暫存進 session，等使用者按「是/否」再決定要不要寫入
+    session_store.set(user_id, {
+        "type": "pending_save",
+        "result_items": result_items,
+        "total_cal": total_cal,
+        "total_pro": total_pro,
+    })
+    return [text_msg("\n".join(lines), quick_options=SAVE_QUICK)]
+
+
+def handle_pending_save(user_id, text):
+    """使用者對『是否記錄』的回覆。"""
+    state = session_store.get(user_id)
+    if not state or state.get("type") != "pending_save":
+        # 逾時或狀態遺失
+        return [text_msg(
+            "⚠️ 這筆營養結果已逾時（可能超過 15 分鐘或系統重啟），沒有記錄下來。\n"
+            "如果要記錄，請重新上傳一次照片 📷")]
+
+    if text in SAVE_YES_WORDS:
+        nickname = get_nickname(user_id)
+        saved = notion_service.save_record(
+            user_id, state["result_items"],
+            state["total_cal"], state["total_pro"], nickname)
+        session_store.clear(user_id)
+        msg = ("✅ 已計入今天的飲食紀錄！" if saved
+               else "⚠️ 記錄儲存失敗，請稍後再試 🙏")
+        return [text_msg(msg, quick_options=MAIN_QUICK)]
+
+    if text in SAVE_NO_WORDS:
+        session_store.clear(user_id)
+        return [text_msg("好的，這餐不計入紀錄 👌（純查詢）", quick_options=MAIN_QUICK)]
+
+    # 其他輸入 → 再問一次
+    return [text_msg("請問是否要將這餐計入今天的飲食紀錄？請點下方按鈕 🙏",
+                     quick_options=SAVE_QUICK)]
 
 
 # ---------------------------------------------------------------------------
@@ -280,7 +319,8 @@ def handle_calc_bmr(user_id):
                f"建議持續每天記錄體重與三餐，累積更多天後再試 🙏")
     else:
         txt = (f"資料不足，目前只有 {r['days']} 天有效紀錄，\n"
-               f"至少需要 {r['need']} 天（每天都要有體重＋前一日的餐點紀錄）。\n"
+               f"至少需要連續上傳 {r['need']} 天體重 & 飲食紀錄"
+               f"（上傳的紀錄越完整之後，重新估算的結果會越準確哦~）。\n"
                f"請持續記錄後再試 🙏")
     return [text_msg(txt, quick_options=MAIN_QUICK)]
 
@@ -360,6 +400,11 @@ def on_text(event):
     # 1) 等待體重輸入
     if state and state.get("type") == "weight":
         reply(event.reply_token, handle_weight_input(user_id, text))
+        return
+
+    # 1.5) 等待「是否記錄」的回覆
+    if state and state.get("type") == "pending_save":
+        reply(event.reply_token, handle_pending_save(user_id, text))
         return
 
     # 2) 核對階段
