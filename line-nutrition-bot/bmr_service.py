@@ -123,7 +123,7 @@ def compute_today_surplus(user_id):
     if today not in weight_map:
         missing.append("今日的體重紀錄")
     if bmr is None:
-        missing.append("當前的基礎代謝率（請先執行一次『計算基礎代謝率』）")
+        missing.append("當前的每日平均消耗熱量（請先執行一次『計算每日平均消耗熱量』）")
 
     if missing:
         return {"status": "missing", "missing": missing}
