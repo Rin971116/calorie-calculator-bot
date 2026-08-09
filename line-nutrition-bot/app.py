@@ -69,6 +69,7 @@ CMD_UPLOAD_WEIGHT = {"上傳今日體重", "上傳體重", "輸入體重", "體�
 CMD_CALC_BMR = {"計算並設定基礎代謝率", "計算基礎代謝率", "基礎代謝率",
                 "計算代謝率", "bmr", "BMR"}
 CMD_SURPLUS = {"今日熱量盈餘", "熱量盈餘", "今日盈餘", "計算盈餘"}
+CMD_SET_PROTEIN = {"設定蛋白質目標", "蛋白質目標", "設定蛋白質", "蛋白質"}
 
 # 核對階段：確認正確 / 取消 的關鍵字
 CONFIRM_WORDS = {"正確", "對", "ok", "OK", "Ok", "沒問題", "無誤", "正确"}
@@ -77,7 +78,7 @@ CANCEL_WORDS = {"取消", "算了", "不用了", "不用", "重傳", "重新上�
 # 主選單按鈕（顯示＝送出指令）。順序：上傳今日體重、今日熱量盈餘、
 # 今日統計、本週統計、本月統計、計算並設定基礎代謝率
 MAIN_QUICK = ["上傳今日體重", "今日熱量盈餘", "今日統計",
-              "本週統計", "本月統計", "計算並設定基礎代謝率"]
+              "本週統計", "本月統計", "計算並設定基礎代謝率", "設定蛋白質目標"]
 # 核對階段的快捷按鈕
 REVIEW_QUICK = ["正確", "取消"]
 # 等待輸入時（例如體重）顯示的取消按鈕
@@ -251,11 +252,46 @@ def handle_pending_save(user_id, text):
 # ---------------------------------------------------------------------------
 # 營養統計
 # ---------------------------------------------------------------------------
+def _build_protein_line(user_id, protein_now):
+    """
+    組出蛋白質那一行（含目標與達標狀態）。
+    規則：目標 = 最近一次體重 × 加權數。
+      - 沒設加權數 → 提示尚未設定
+      - 有加權數但沒體重 → 提示需要體重
+      - 都有 → 顯示 x g / 目標 g（達標狀態），若體重非今日再提示上傳今日體重
+    """
+    factor = notion_service.get_protein_factor(user_id)
+    if factor is None:
+        return f"總蛋白質：{protein_now} g（尚未設定蛋白質目標）", None
+
+    weight, wdate = notion_service.get_latest_weight(user_id)
+    if weight is None:
+        return f"總蛋白質：{protein_now} g（需要體重才能計算目標，請先上傳體重）", None
+
+    target = round(weight * factor)
+    if protein_now >= target:
+        status = "✅ 已達標"
+    else:
+        status = f"尚未達標，還差 {target - protein_now} g"
+    line = f"總蛋白質：{protein_now} g / {target} g（{status}）"
+
+    # 若採用的體重不是今天的，附註提示上傳今日體重
+    tz = datetime.timezone(datetime.timedelta(hours=Config.TIMEZONE_OFFSET))
+    today = datetime.datetime.now(tz).date().isoformat()
+    hint = None
+    if wdate != today:
+        hint = f"（目標依最近一次體重 {weight}kg 計算，建議上傳今日體重以更準確）"
+    return line, hint
+
+
 def handle_stats(user_id, kind):
     if kind == "today":
         s = notion_service.get_today_total(user_id)
+        protein_line, hint = _build_protein_line(user_id, s['protein'])
         txt = (f"📊 今日累計（{s['meals']} 餐）\n"
-               f"總熱量：{s['calories']} kcal\n總蛋白質：{s['protein']} g")
+               f"總熱量：{s['calories']} kcal\n{protein_line}")
+        if hint:
+            txt += f"\n{hint}"
     elif kind == "week":
         s = notion_service.get_week_average(user_id)
         txt = (f"📊 本週每日平均（統計 {s['days']} 天）\n"
@@ -294,9 +330,45 @@ def handle_weight_input(user_id, text):
 
 
 # ---------------------------------------------------------------------------
-# 計算基礎代謝率
+# 設定蛋白質目標（加權數）
 # ---------------------------------------------------------------------------
-def handle_calc_bmr(user_id):
+def prompt_protein(user_id):
+    session_store.set(user_id, {"type": "protein"})
+    return [text_msg(
+        "請輸入每日蛋白質目標的加權數（體重的幾倍）\n"
+        "例如輸入 1.5，代表目標＝體重 × 1.5 克\n"
+        "（一般建議 1.2 ~ 2.2；可接受範圍 0.5 ~ 3）\n\n"
+        "（不想設定可按下方「取消」）",
+        quick_options=CANCEL_QUICK)]
+
+
+def handle_protein_input(user_id, text):
+    raw = text.strip().replace("倍", "").strip()
+    try:
+        factor = round(float(raw), 2)
+    except ValueError:
+        return [text_msg("格式不正確 😅 請只輸入數字，例如：1.5\n（或按下方「取消」離開）",
+                         quick_options=CANCEL_QUICK)]
+    # 範圍檢查：超出 0.5~3 不寫入 Notion
+    if not (0.5 <= factor <= 3):
+        return [text_msg("加權數需在 0.5 ~ 3 之間 🙏 請重新輸入（例如 1.5）\n（或按下方「取消」離開）",
+                         quick_options=CANCEL_QUICK)]
+    session_store.clear(user_id)
+    nickname = get_nickname(user_id)
+    ok = notion_service.upsert_protein_factor(user_id, factor, nickname)
+    if ok:
+        # 若已有體重，順便算一次目標給使用者看
+        weight, _ = notion_service.get_latest_weight(user_id)
+        if weight is not None:
+            target = round(weight * factor)
+            msg = (f"✅ 已設定蛋白質目標：體重 × {factor}\n"
+                   f"以最近體重 {weight}kg 計算，目標約 {target} g/天")
+        else:
+            msg = (f"✅ 已設定蛋白質目標：體重 × {factor}\n"
+                   f"（上傳體重後即可看到每日目標克數）")
+    else:
+        msg = "⚠️ 設定儲存失敗，請稍後再試"
+    return [text_msg(msg, quick_options=MAIN_QUICK)]
     r = bmr_service.compute_week_bmr(user_id)
     status = r["status"]
     if status == "ok":
@@ -320,7 +392,7 @@ def handle_calc_bmr(user_id):
     else:
         txt = (f"資料不足，目前只有 {r['days']} 天有效紀錄，\n"
                f"至少需要連續上傳 {r['need']} 天體重 & 飲食紀錄"
-               f"（上傳的紀錄越完整之後，重新估算的結果會越準確哦~）。\n"
+               f"（上傳的紀錄越完整，估算的結果越準確哦~）。\n"
                f"請持續記錄後再試 🙏")
     return [text_msg(txt, quick_options=MAIN_QUICK)]
 
@@ -402,6 +474,11 @@ def on_text(event):
         reply(event.reply_token, handle_weight_input(user_id, text))
         return
 
+    # 1.2) 等待蛋白質加權數輸入
+    if state and state.get("type") == "protein":
+        reply(event.reply_token, handle_protein_input(user_id, text))
+        return
+
     # 1.5) 等待「是否記錄」的回覆
     if state and state.get("type") == "pending_save":
         reply(event.reply_token, handle_pending_save(user_id, text))
@@ -424,6 +501,9 @@ def on_text(event):
         return
     if text in CMD_SURPLUS:
         reply(event.reply_token, handle_surplus(user_id))
+        return
+    if text in CMD_SET_PROTEIN:
+        reply(event.reply_token, prompt_protein(user_id))
         return
 
     # 4) 沒有進行中狀態，但訊息像更正指示 → 可能是核對階段過期了
